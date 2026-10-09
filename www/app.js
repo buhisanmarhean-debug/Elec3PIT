@@ -214,6 +214,7 @@
     try { return navigator.clipboard.writeText(msg).then(() => true, () => false); } catch { return Promise.resolve(false); }
   };
 
+  
   // ---- contacts (Contacts page) -----------------------------------------
   if ($('contacts')) {
     let contacts = store.get('contacts', []);
@@ -276,7 +277,24 @@
       });
     }
 
+   
+const contactInputs = document.querySelectorAll('#cName, #cPhone, #cMsgr');
+const addBtn = document.getElementById('addContact');
+
+
+contactInputs.forEach(input => {
+  input.addEventListener('keypress', function(event) {
+  
+    if (event.key === 'Enter') {
+      event.preventDefault(); 
+      addBtn.click();       
+    }
+  });
+});
+
     $('addContact').onclick = () => {
+
+      
       const name = $('cName').value.trim();
       const phone = $('cPhone').value.trim();
       const messenger = $('cMsgr').value.trim().replace(/^.*(?:m\.me|messenger\.com\/t|facebook\.com)\//, '').replace(/[@\/]/g, '');
@@ -328,3 +346,4 @@
   tick();
   setInterval(tick, 3000);
 })();
+
