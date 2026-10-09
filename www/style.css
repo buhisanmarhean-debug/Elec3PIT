@@ -69,7 +69,7 @@ body {
 .app {
   width: 100%;
   max-width: 412px;
-  min-height: 100dvh;
+  min-height: 60dvh;
   max-height: 915px;
   display: flex;
   flex-direction: column;
@@ -175,7 +175,7 @@ body {
 /* ---------- Panels ---------- */
 .panel { border-radius: var(--r-lg); padding: 16px; margin-top: 12px; display: flex; flex-direction: column; }
 .panel h3 { margin: 0 0 12px; font-size: .88rem; font-weight: 500; display: flex; justify-content: space-between; align-items: center; }
-.panel h4 { display: flex; flex-direction: column; height: calc(47vh - 50px); }
+.panel h4 { display: flex; flex-direction: column; height: calc(50vh - 20px); }
 #spark { width: 100%; height: 70px; display: block; }
 
 /* ---------- Buttons ---------- */
@@ -278,7 +278,7 @@ body[data-state="danger"] .quick button {
 }
 .strip[hidden] { display: none; }
 .toast {
-  position: fixed; left: 50%; bottom: 100px; transform: translate(-50%, 20px); opacity: 0; pointer-events: none;
+  position: fixed; left: 50%; bottom: 350px; transform: translate(-50%, 20px); opacity: 0; pointer-events: none;
   max-width: 90%; padding: 12px 18px; border-radius: 14px; font-size: .82rem; font-weight: 500;
   background: var(--card); color: var(--text); border: 1px solid var(--border);
   -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur);
