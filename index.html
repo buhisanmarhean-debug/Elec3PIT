@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SafeHome — Home</title>
+<script>(function(){try{var t=localStorage.getItem('theme')||(matchMedia('(prefers-color-scheme: light)').matches?'light':'dark');document.documentElement.dataset.theme=t}catch(e){document.documentElement.dataset.theme='dark'}})()</script>
+<link rel="stylesheet" href="style.css">
+</head>
+<body data-state="safe">
+
+<main class="app">
+  <header class="top">
+    <div class="brand">
+      <div class="logo">
+        <svg viewBox="0 0 24 24"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6l8-3z"/><path d="M9 12l2 2 4-4"/></svg>
+      </div>
+      <div><h1>SafeHome</h1><small>Smoke &amp; Gas Guard</small></div>
+    </div>
+    <div class="right">
+      <div class="conn" id="conn"><span class="dot"></span><span id="connText">ESP32 online</span></div>
+      <button class="theme-btn" id="themeBtn" aria-label="Toggle dark/light mode">🌙</button>
+    </div>
+  </header>
+
+  <div class="strip" id="strip" hidden role="alert"><span>🚨 Smoke detected!</span><b>Alert contacts →</b></div>
+
+  <div class="pages">
+    <section class="gauge-card">
+    <h2>Air Concentration</h2>
+    <div class="gauge">
+      <svg viewBox="0 0 200 110">
+        <path class="track" d="M20 100 A80 80 0 0 1 180 100"/>
+        <path class="fill" id="arc" d="M20 100 A80 80 0 0 1 180 100"/>
+      </svg>
+      <div class="reading"><div class="num" id="ppm">380</div><div class="unit">gas level</div></div>
+    </div>
+    <div class="scale"><span>0</span><span>500</span><span>1000</span></div>
+    <div class="pill" id="pill">● Safe range</div>
+  </section>
+    <section class="alert" id="alert">
+    <div class="ic" id="alertIcon">✅</div>
+    <div><b id="alertTitle">All clear</b><span id="alertSub">No smoke or gas detected</span></div>
+  </section>
+    <section class="stats">
+    <div class="stat"><label>Min</label><div id="min">–</div></div>
+    <div class="stat"><label>Avg</label><div id="avg">–</div></div>
+    <div class="stat"><label>Peak</label><div id="max">–</div></div>
+  </section>
+    <section class="actions">
+    <button id="muteBtn">🔕 Silence alarm</button>
+    <button class="primary" id="testBtn">🧪 Test sensor</button>
+  </section>
+  </div>
+
+  <nav class="tabs" aria-label="Pages">
+    <a href="index.html" class="on"><span>🏠</span>Home</a>
+    <a href="sensors.html"><span>📡</span>Sensors</a>
+    <a href="contacts.html"><span>👥</span>Contacts</a>
+    <a href="activity.html"><span>📋</span>Activity</a>
+  </nav>
+</main>
+<div class="toast" id="toast"></div>
+
+<script src="app.js"></script>
+</body>
+</html>
