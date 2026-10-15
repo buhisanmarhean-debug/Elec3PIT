@@ -5,7 +5,7 @@
   'use strict';
 
   // Thresholds (gas level 0-1000, must match the ESP32 sketch)
-  const WARN = 500, DANGER = 700, MAX = 1000, ARC_LEN = 251.3;
+const WARN = 1100, DANGER = 1200, MAX = 2000, ARC_LEN = 251.3;
 
   const $ = id => document.getElementById(id);
   const txt = (id, t) => { const e = $(id); if (e) e.textContent = t; };
@@ -18,7 +18,7 @@
 
   const classify = v => v >= DANGER ? 'danger' : v >= WARN ? 'warn' : 'safe';
   const STATES = {
-    safe:   { pill: '● Safe range', icon: '✅', title: 'All clear',       sub: 'No smoke or gas detected',     tag: 'safe' },
+    safe:   { pill: '● Safe range', icon: '✅', title: 'All clear',       sub: 'No smoke or gas detected',    tag: 'safe' },
     warn:   { pill: '● Elevated',   icon: '⚠️', title: 'Elevated levels', sub: 'Ventilate and check the area', tag: 'warn' },
     danger: { pill: '● Danger',     icon: '🚨', title: 'Smoke detected!', sub: 'Inspect the area immediately', tag: 'danger' },
   };
@@ -43,10 +43,10 @@
     const log = store.get('log', []);
     log.unshift(e); log.length = Math.min(log.length, 60);
     store.set('log', log);
-    if ($('log')) $('log').prepend(logRow(e));
+    if ($('log'))$('log').prepend(logRow(e));
   }
   if (!store.get('log', []).length) addLog('System initialized');
-  if ($('log')) store.get('log', []).forEach(e => $('log').append(logRow(e)));
+  if ($('log')) store.get('log', []).forEach(e =>$('log').append(logRow(e)));
 
   // ---- toast -------------------------------------------------------------
   let toastTimer;
@@ -78,13 +78,13 @@
     document.body.dataset.state = state;
     const info = STATES[state];
     txt('pill', info.pill); txt('alertIcon', info.icon); txt('alertTitle', info.title); txt('alertSub', info.sub);
-    if ($('strip')) $('strip').hidden = state !== 'danger';
-    if ($('muteBtn')) $('muteBtn').style.display = (state === 'danger' && !muted) ? '' : 'none';
+    if ($('strip'))$('strip').hidden = state !== 'danger';
+    if ($('muteBtn'))$('muteBtn').style.display = (state === 'danger' && !muted) ? '' : 'none';
 
     const v = readings.at(-1);
     if (v === undefined) return;
     txt('ppm', v);
-    if ($('arc')) $('arc').style.strokeDashoffset = ARC_LEN * (1 - Math.min(v, MAX) / MAX);
+    if ($('arc'))$('arc').style.strokeDashoffset = ARC_LEN * (1 - Math.min(v, MAX) / MAX);
     if ($('min')) {
       txt('min', Math.min(...readings));
       txt('max', Math.max(...readings));
@@ -117,8 +117,7 @@
 
   // ---- sensors panel -----------------------------------------------------
   const SENSORS = [['mq2', 'MQ-2', 'Smoke · LPG'], ['mq7', 'MQ-7', 'Carbon monoxide'], ['mq135', 'MQ-135', 'Air quality']];
-  if ($('sensorList')) {
-    $('sensorList').innerHTML = SENSORS.map(([k, name, what]) =>
+  if ($('sensorList')) {$('sensorList').innerHTML = SENSORS.map(([k, name, what]) =>
       `<div class="sensor"><div><b>${name}</b><small>${what}</small></div><div class="val" id="v-${k}">–</div><div class="bar"><i id="b-${k}"></i></div></div>`
     ).join('');
   }
@@ -127,20 +126,20 @@
     store.set('lastSensors', r);
     SENSORS.forEach(([k]) => {
       const v = Math.max(0, Math.min(MAX, r[k] ?? 0));
-      $('b-' + k).style.width = (v / MAX * 100) + '%';
-      $('b-' + k).style.background = `var(--${classify(v)})`;
-      $('v-' + k).textContent = r.warmup ? '…' : Math.round(v);
+      if ($('b-' + k))$('b-' + k).style.width = (v / MAX * 100) + '%';
+      if ($('b-' + k))$('b-' + k).style.background = `var(--${classify(v)})`;
+      if ($('v-' + k))$('v-' + k).textContent = r.warmup ? '…' : Math.round(v);
     });
   }
 
   function setConn(m, left) {
-    $('conn').classList.toggle('off', m === 'offline');
-    $('connText').textContent = { demo: 'Demo mode', connecting: 'Connecting…', online: 'ESP32 online', offline: 'ESP32 offline', warmup: `Warming up ${left ?? ''}s` }[m];
+    if ($('conn'))$('conn').classList.toggle('off', m === 'offline');
+    if ($('connText'))$('connText').textContent = { demo: 'Demo mode', connecting: 'Connecting…', online: 'ESP32 online', offline: 'ESP32 offline', warmup: `Warming up ${left ?? ''}s` }[m];
     txt('mode', m === 'demo' ? 'Demo data' : 'Live');
   }
 
   // ---- data source -------------------------------------------------------
-  // Live mode: http://<ESP32_IP>/data -> {mq2, mq7, mq135, warmup, warmupLeft}  (levels 0-1000)
+  // Live mode: fetch from Django backend
   // Demo mode (no IP set): simulated readings
   async function readSensor() {
     const espIp = store.get('espIp', '');
@@ -148,9 +147,21 @@
       const ctl = new AbortController();
       const timer = setTimeout(() => ctl.abort(), 2500);
       try {
-        const r = await fetch(`http://${espIp}/data`, { signal: ctl.signal });
+        const r = await fetch(`http://127.0.0.1:8000/api/telemetry/`, { signal: ctl.signal });
         if (!r.ok) throw new Error(r.status);
-        return await r.json();
+        
+        const data = await r.json();
+        if (data && data.length > 0) {
+            const latest = data[0]; // Grab the most recent reading from the array
+            return { 
+                mq2: latest.mq2_avg || 0, 
+                mq7: latest.mq7_rise || 0, 
+                mq135: latest.mq135_rise || 0 
+            };
+        }
+      } catch (e) {
+          console.error("Backend fetch error:", e);
+          throw e;
       } finally { clearTimeout(timer); }
     }
     const jitter = () => Math.round((Math.random() - 0.5) * 30);
@@ -177,13 +188,13 @@
   }
 
   // ---- actions (Home page) ----------------------------------------------
-  if ($('muteBtn')) $('muteBtn').onclick = () => {
+  if ($('muteBtn'))$('muteBtn').onclick = () => {
     muted = true; store.set('muted', true); paint();
     addLog('Alarm silenced by user', 'info');
     const ip = store.get('espIp', '');
     if (ip) fetch(`http://${ip}/mute`).catch(() => addLog('Could not reach ESP32 to silence buzzer', 'warn'));
   };
-  if ($('testBtn')) $('testBtn').onclick = () => {
+  if ($('testBtn'))$('testBtn').onclick = () => {
     addLog('Sensor test started', 'info');
     const ip = store.get('espIp', '');
     if (ip) fetch(`http://${ip}/test`).catch(() => addLog('Could not reach ESP32', 'warn'));
@@ -193,13 +204,11 @@
 
   // ---- ESP32 connection (Sensors page) ----------------------------------
   if ($('espIp')) {
-    $('espIp').value = store.get('espIp', '');
-    $('connectBtn').onclick = () => {
-      const ip = $('espIp').value.trim().replace(/^https?:\/\//, '').replace(/\/.*$/, '');
-      $('espIp').value = ip;
+    $('espIp').value = store.get('espIp', '');$('connectBtn').onclick = () => {
+      const ip = $('espIp').value.trim().replace(/^https?:\/\//, '').replace(/\/.*$/, '');$('espIp').value = ip;
       store.set('espIp', ip);
       readings = []; store.set('readings', readings);
-      addLog(ip ? `Connecting to ESP32 at ${ip}` : 'Switched to demo mode', 'info');
+      addLog(ip ? `Connecting to backend...` : 'Switched to demo mode', 'info');
       setConn(ip ? 'connecting' : 'demo');
       tick();
     };
@@ -214,7 +223,6 @@
     try { return navigator.clipboard.writeText(msg).then(() => true, () => false); } catch { return Promise.resolve(false); }
   };
 
-  
   // ---- contacts (Contacts page) -----------------------------------------
   if ($('contacts')) {
     let contacts = store.get('contacts', []);
@@ -222,11 +230,11 @@
 
     function resetForm() {
       editIndex = -1;
-      $('cName').value = $('cPhone').value = $('cMsgr').value = '';
-      $('addContact').textContent = '+ Add contact';
-      $('cancelEdit').style.display = 'none';
+      $('cName').value = $('cPhone').value =$('cMsgr').value = '';
+      $('addContact').textContent = '+ Add contact';$('cancelEdit').style.display = 'none';
     }
-    function startEdit(i) {
+    
+   function startEdit(i) {
       const c = contacts[i];
       editIndex = i;
       $('cName').value = c.name;
@@ -243,6 +251,7 @@
       const sep = /iPhone|iPad|iPod/i.test(navigator.userAgent) ? '&' : '?';   // iPhone "&body=", Android "?body="
       location.href = `sms:${nums}${sep}body=${encodeURIComponent(alertMsg())}`;
     }
+    
     function openMessenger(c) {
       const msg = alertMsg();
       copyMsg(msg).then(ok => toast(ok ? 'Message copied — if the chat opens empty, just paste it' : 'If the chat opens empty, type your alert'));
@@ -277,66 +286,69 @@
       });
     }
 
-   
-const contactInputs = document.querySelectorAll('#cName, #cPhone, #cMsgr');
-const addBtn = document.getElementById('addContact');
+    const contactInputs = document.querySelectorAll('#cName, #cPhone, #cMsgr');
+    const addBtn = document.getElementById('addContact');
 
+    if (contactInputs && addBtn) {
+      contactInputs.forEach(input => {
+        input.addEventListener('keypress', function(event) {
+          if (event.key === 'Enter') {
+            event.preventDefault(); 
+            addBtn.click();       
+          }
+        });
+      });
 
-contactInputs.forEach(input => {
-  input.addEventListener('keypress', function(event) {
-  
-    if (event.key === 'Enter') {
-      event.preventDefault(); 
-      addBtn.click();       
+      $('addContact').onclick = () => {
+        const name = $('cName').value.trim();
+        const phone = $('cPhone').value.trim();
+        const messenger = $('cMsgr').value.trim().replace(/^.*(?:m\.me|messenger\.com\/t|facebook\.com)\//, '').replace(/[@\/]/g, '');
+        if (!name || (!validPhone(phone) && !messenger)) { toast('Enter a name and a phone number or Messenger username'); return; }
+        const entry = { name, phone: validPhone(phone) ? phone : '', messenger };
+        if (editIndex >= 0) { contacts[editIndex] = entry; addLog(`Contact updated: ${name}`, 'info'); toast('Contact updated'); }
+        else { contacts.push(entry); addLog(`Contact added: ${name}`, 'info'); }
+        store.set('contacts', contacts);
+        resetForm();
+        renderContacts();
+      };
     }
-  });
-});
+    
+    if ($('cancelEdit'))$('cancelEdit').onclick = resetForm;
 
-    $('addContact').onclick = () => {
-
-      
-      const name = $('cName').value.trim();
-      const phone = $('cPhone').value.trim();
-      const messenger = $('cMsgr').value.trim().replace(/^.*(?:m\.me|messenger\.com\/t|facebook\.com)\//, '').replace(/[@\/]/g, '');
-      if (!name || (!validPhone(phone) && !messenger)) { toast('Enter a name and a phone number or Messenger username'); return; }
-      const entry = { name, phone: validPhone(phone) ? phone : '', messenger };
-      if (editIndex >= 0) { contacts[editIndex] = entry; addLog(`Contact updated: ${name}`, 'info'); toast('Contact updated'); }
-      else { contacts.push(entry); addLog(`Contact added: ${name}`, 'info'); }
-      store.set('contacts', contacts);
-      resetForm();
-      renderContacts();
-    };
-    $('cancelEdit').onclick = resetForm;
-
-    $('smsAll').onclick = () => {
-      const list = contacts.filter(c => validPhone(c.phone));
-      if (!list.length) { toast('Add a contact with a phone number first'); return; }
-      openSms(list);
-    };
-    $('shareBtn').onclick = async () => {
-      const msg = alertMsg();
-      if (navigator.share) {                  // phone share sheet: pick Messenger, SMS, etc.
-        try { await navigator.share({ title: 'SafeHome Alert', text: msg }); addLog('Alert shared', 'info'); } catch {}
-      } else {
-        toast((await copyMsg(msg)) ? 'Alert message copied — paste it into Messenger' : 'Sharing is not supported here');
-      }
-    };
+    if ($('smsAll')) {$('smsAll').onclick = () => {
+        const list = contacts.filter(c => validPhone(c.phone));
+        if (!list.length) { toast('Add a contact with a phone number first'); return; }
+        openSms(list);
+      };
+    }
+    
+    if ($('shareBtn')) {$('shareBtn').onclick = async () => {
+        const msg = alertMsg();
+        if (navigator.share) {                  // phone share sheet: pick Messenger, SMS, etc.
+          try { await navigator.share({ title: 'SafeHome Alert', text: msg }); addLog('Alert shared', 'info'); } catch {}
+        } else {
+          toast((await copyMsg(msg)) ? 'Alert message copied — paste it into Messenger' : 'Sharing is not supported here');
+        }
+      };
+    }
     renderContacts();
   }
 
   // ---- alert strip & theme (every page) ---------------------------------
-  if ($('strip')) $('strip').onclick = () => { location.href = 'contacts.html'; };
+  if ($('strip'))$('strip').onclick = () => { location.href = 'contacts.html'; };
 
   function applyTheme(t) {
     document.documentElement.dataset.theme = t;
-    $('themeBtn').textContent = t === 'dark' ? '🌙' : '☀️';
+    if ($('themeBtn'))$('themeBtn').textContent = t === 'dark' ? '🌙' : '☀️';
   }
   applyTheme(document.documentElement.dataset.theme || 'dark');
-  $('themeBtn').onclick = () => {
-    const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
-    applyTheme(next);
-    try { localStorage.setItem('theme', next); } catch {}
-  };
+  
+  if ($('themeBtn')) {$('themeBtn').onclick = () => {
+      const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+      applyTheme(next);
+      try { localStorage.setItem('theme', next); } catch {}
+    };
+  }
 
   // ---- start -------------------------------------------------------------
   setConn(store.get('espIp', '') ? 'connecting' : 'demo');
@@ -346,4 +358,3 @@ contactInputs.forEach(input => {
   tick();
   setInterval(tick, 3000);
 })();
-
