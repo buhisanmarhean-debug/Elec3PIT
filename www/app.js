@@ -4,8 +4,25 @@
 (() => {
   'use strict';
 
-  // Thresholds (gas level 0-1000, must match the ESP32 sketch)
-const WARN = 1100, DANGER = 1200, MAX = 2000, ARC_LEN = 251.3;
+  // ==========================================================================
+  // SETTINGS YOU MAY NEED TO EDIT
+  // ==========================================================================
+
+  // Where your Django backend runs. Use your PC's WiFi IP (e.g. http://192.168.0.10:8000)
+  // if you open the app from a phone. 127.0.0.1 only works on the PC running Django.
+  const BACKEND = 'http://127.0.0.1:8000';
+
+  // The gauge works on a "level" where 1000 = a sensor reached ITS OWN alarm point.
+  const WARN = 600, DANGER = 1000, MAX = 2000, ARC_LEN = 251.3;
+
+  // MQ-2 sends an absolute level (avg). Put here the value the app shows for the MQ-2
+  // when nothing is happening (check it after warm-up/calibration).
+  const MQ2_IDLE = 900;
+
+  // The "alarm>" numbers your ESP32 prints in the serial monitor after calibration.
+  const ALARM_AT = { mq2: 100, mq7: 40, mq135: 100 };
+
+  // ==========================================================================
 
   const $ = id => document.getElementById(id);
   const txt = (id, t) => { const e = $(id); if (e) e.textContent = t; };
@@ -24,10 +41,25 @@ const WARN = 1100, DANGER = 1200, MAX = 2000, ARC_LEN = 251.3;
   };
 
   // ---- shared state (persisted) ------------------------------------------
-  let readings = store.get('readings', []);
+  // 'readings2' (not 'readings') so old values on the previous scale don't get mixed in
+  let readings = store.get('readings2', []);
   let state    = store.get('state', 'safe');
   let muted    = store.get('muted', false);
   let forceSpike = false;
+
+  // ---- sensor levels -----------------------------------------------------
+  // Turns each sensor's number into "how close is it to its own alarm point".
+  const SENSOR_KEYS = ['mq2', 'mq7', 'mq135'];
+
+  function sensorLevel(k, v, live) {
+    if (!live) return Math.max(0, v);                       // demo mode: numbers are already levels
+    const rise = k === 'mq2' ? v - MQ2_IDLE : v;            // MQ-2 is absolute, MQ-7/MQ-135 are already rises
+    return Math.max(0, rise / ALARM_AT[k] * DANGER);
+  }
+
+  function overallLevel(r, live) {
+    return Math.round(Math.max(...SENSOR_KEYS.map(k => sensorLevel(k, r[k] ?? 0, live))));
+  }
 
   // ---- activity log ------------------------------------------------------
   function logRow(e) {
@@ -43,10 +75,10 @@ const WARN = 1100, DANGER = 1200, MAX = 2000, ARC_LEN = 251.3;
     const log = store.get('log', []);
     log.unshift(e); log.length = Math.min(log.length, 60);
     store.set('log', log);
-    if ($('log'))$('log').prepend(logRow(e));
+    if ($('log')) $('log').prepend(logRow(e));
   }
   if (!store.get('log', []).length) addLog('System initialized');
-  if ($('log')) store.get('log', []).forEach(e =>$('log').append(logRow(e)));
+  if ($('log')) store.get('log', []).forEach(e => $('log').append(logRow(e)));
 
   // ---- toast -------------------------------------------------------------
   let toastTimer;
@@ -62,7 +94,7 @@ const WARN = 1100, DANGER = 1200, MAX = 2000, ARC_LEN = 251.3;
     const w = 300, h = 70, n = 30, pts = readings.slice(-n);
     if (pts.length < 2) return;
     const step = w / (n - 1), off = n - pts.length;
-    const xy = pts.map((v, i) => [(i + off) * step, h - (v / MAX) * (h - 6) - 3]);
+    const xy = pts.map((v, i) => [(i + off) * step, h - (Math.min(v, MAX) / MAX) * (h - 6) - 3]);
     const line = xy.map(p => p.join(',')).join(' ');
     const dY = h - (DANGER / MAX) * (h - 6) - 3;
     box.innerHTML = `
@@ -78,13 +110,13 @@ const WARN = 1100, DANGER = 1200, MAX = 2000, ARC_LEN = 251.3;
     document.body.dataset.state = state;
     const info = STATES[state];
     txt('pill', info.pill); txt('alertIcon', info.icon); txt('alertTitle', info.title); txt('alertSub', info.sub);
-    if ($('strip'))$('strip').hidden = state !== 'danger';
-    if ($('muteBtn'))$('muteBtn').style.display = (state === 'danger' && !muted) ? '' : 'none';
+    if ($('strip')) $('strip').hidden = state !== 'danger';
+    if ($('muteBtn')) $('muteBtn').style.display = (state === 'danger' && !muted) ? '' : 'none';
 
     const v = readings.at(-1);
     if (v === undefined) return;
     txt('ppm', v);
-    if ($('arc'))$('arc').style.strokeDashoffset = ARC_LEN * (1 - Math.min(v, MAX) / MAX);
+    if ($('arc')) $('arc').style.strokeDashoffset = ARC_LEN * (1 - Math.min(v, MAX) / MAX);
     if ($('min')) {
       txt('min', Math.min(...readings));
       txt('max', Math.max(...readings));
@@ -96,7 +128,7 @@ const WARN = 1100, DANGER = 1200, MAX = 2000, ARC_LEN = 251.3;
   function render(v) {
     readings.push(v);
     if (readings.length > 200) readings.shift();
-    store.set('readings', readings);
+    store.set('readings2', readings);
 
     const s = classify(v);
     if (s !== state) {                         // only react (and log) on a state change
@@ -117,29 +149,36 @@ const WARN = 1100, DANGER = 1200, MAX = 2000, ARC_LEN = 251.3;
 
   // ---- sensors panel -----------------------------------------------------
   const SENSORS = [['mq2', 'MQ-2', 'Smoke · LPG'], ['mq7', 'MQ-7', 'Carbon monoxide'], ['mq135', 'MQ-135', 'Air quality']];
-  if ($('sensorList')) {$('sensorList').innerHTML = SENSORS.map(([k, name, what]) =>
+  if ($('sensorList')) {
+    $('sensorList').innerHTML = SENSORS.map(([k, name, what]) =>
       `<div class="sensor"><div><b>${name}</b><small>${what}</small></div><div class="val" id="v-${k}">–</div><div class="bar"><i id="b-${k}"></i></div></div>`
     ).join('');
   }
+
+  // The number shown is the sensor's own value; the bar and its colour show how close it is to its alarm point.
   function showSensors(r) {
     if (!$('sensorList')) return;
     store.set('lastSensors', r);
+    const live = !!store.get('espIp', '');
     SENSORS.forEach(([k]) => {
-      const v = Math.max(0, Math.min(MAX, r[k] ?? 0));
-      if ($('b-' + k))$('b-' + k).style.width = (v / MAX * 100) + '%';
-      if ($('b-' + k))$('b-' + k).style.background = `var(--${classify(v)})`;
-      if ($('v-' + k))$('v-' + k).textContent = r.warmup ? '…' : Math.round(v);
+      const rawVal = r[k] ?? 0;
+      const lvl = Math.min(MAX, sensorLevel(k, rawVal, live));
+      if ($('b-' + k)) {
+        $('b-' + k).style.width = (lvl / MAX * 100) + '%';
+        $('b-' + k).style.background = `var(--${classify(lvl)})`;
+      }
+      if ($('v-' + k)) $('v-' + k).textContent = r.warmup ? '…' : Math.round(rawVal);
     });
   }
 
   function setConn(m, left) {
-    if ($('conn'))$('conn').classList.toggle('off', m === 'offline');
-    if ($('connText'))$('connText').textContent = { demo: 'Demo mode', connecting: 'Connecting…', online: 'ESP32 online', offline: 'ESP32 offline', warmup: `Warming up ${left ?? ''}s` }[m];
+    if ($('conn')) $('conn').classList.toggle('off', m === 'offline');
+    if ($('connText')) $('connText').textContent = { demo: 'Demo mode', connecting: 'Connecting…', online: 'ESP32 online', offline: 'ESP32 offline', warmup: `Warming up ${left ?? ''}s` }[m];
     txt('mode', m === 'demo' ? 'Demo data' : 'Live');
   }
 
   // ---- data source -------------------------------------------------------
-  // Live mode: fetch from Django backend
+  // Live mode: fetch from the Django backend
   // Demo mode (no IP set): simulated readings
   async function readSensor() {
     const espIp = store.get('espIp', '');
@@ -147,31 +186,34 @@ const WARN = 1100, DANGER = 1200, MAX = 2000, ARC_LEN = 251.3;
       const ctl = new AbortController();
       const timer = setTimeout(() => ctl.abort(), 2500);
       try {
-        const r = await fetch(`http://127.0.0.1:8000/api/telemetry/`, { signal: ctl.signal });
-        if (!r.ok) throw new Error(r.status);
-        
-        const data = await r.json();
-        if (data && data.length > 0) {
-            const latest = data[0]; // Grab the most recent reading from the array
-            return { 
-                mq2: latest.mq2_avg || 0, 
-                mq7: latest.mq7_rise || 0, 
-                mq135: latest.mq135_rise || 0 
-            };
-        }
+        const res = await fetch(`${BACKEND}/api/telemetry/`, { signal: ctl.signal });
+        if (!res.ok) throw new Error(res.status);
+
+        const data = await res.json();
+        const list = Array.isArray(data) ? data : (data.results || []);   // plain list or paginated
+        if (!list.length) throw new Error('no telemetry yet');
+
+        const latest = list[0];   // most recent reading
+        return {
+          mq2: latest.mq2_avg || 0,
+          mq7: latest.mq7_rise || 0,
+          mq135: latest.mq135_rise || 0
+        };
       } catch (e) {
-          console.error("Backend fetch error:", e);
-          throw e;
+        console.error('Backend fetch error:', e);
+        throw e;
       } finally { clearTimeout(timer); }
     }
+
+    // Demo data. Spikes go above DANGER so the Test button shows a real alarm.
     const jitter = () => Math.round((Math.random() - 0.5) * 30);
     let v;
-    if (forceSpike) { forceSpike = false; v = 760 + Math.floor(Math.random() * 120); }
+    if (forceSpike) { forceSpike = false; v = 1050 + Math.floor(Math.random() * 150); }
     else {
       const last = readings.at(-1) ?? 120;
       v = last + (Math.random() - 0.5) * 60 + (120 - last) * 0.1;           // drift toward baseline
-      if (Math.random() > 0.96) v = 740 + Math.random() * 120;               // rare spike
-      v = Math.round(Math.max(40, Math.min(980, v)));
+      if (Math.random() > 0.96) v = 1050 + Math.random() * 150;              // rare spike
+      v = Math.round(Math.max(40, Math.min(1300, v)));
     }
     return { mq2: v, mq7: Math.max(0, Math.round(v * 0.55) + jitter()), mq135: Math.max(0, Math.round(v * 0.4) + jitter()) };
   }
@@ -183,18 +225,18 @@ const WARN = 1100, DANGER = 1200, MAX = 2000, ARC_LEN = 251.3;
       setConn(espIp ? (r.warmup ? 'warmup' : 'online') : 'demo', r.warmupLeft);
       showSensors(r);
       if (r.warmup) return;                                   // don't judge readings while sensors warm up
-      render(Math.max(r.mq2, r.mq7, r.mq135));
+      render(overallLevel(r, !!espIp));
     } catch { setConn('offline'); }
   }
 
   // ---- actions (Home page) ----------------------------------------------
-  if ($('muteBtn'))$('muteBtn').onclick = () => {
+  if ($('muteBtn')) $('muteBtn').onclick = () => {
     muted = true; store.set('muted', true); paint();
     addLog('Alarm silenced by user', 'info');
     const ip = store.get('espIp', '');
     if (ip) fetch(`http://${ip}/mute`).catch(() => addLog('Could not reach ESP32 to silence buzzer', 'warn'));
   };
-  if ($('testBtn'))$('testBtn').onclick = () => {
+  if ($('testBtn')) $('testBtn').onclick = () => {
     addLog('Sensor test started', 'info');
     const ip = store.get('espIp', '');
     if (ip) fetch(`http://${ip}/test`).catch(() => addLog('Could not reach ESP32', 'warn'));
@@ -202,13 +244,15 @@ const WARN = 1100, DANGER = 1200, MAX = 2000, ARC_LEN = 251.3;
     setTimeout(tick, 300);
   };
 
-  // ---- ESP32 connection (Sensors page) ----------------------------------
+  // ---- backend connection (Sensors page) --------------------------------
   if ($('espIp')) {
-    $('espIp').value = store.get('espIp', '');$('connectBtn').onclick = () => {
-      const ip = $('espIp').value.trim().replace(/^https?:\/\//, '').replace(/\/.*$/, '');$('espIp').value = ip;
+    $('espIp').value = store.get('espIp', '');
+    $('connectBtn').onclick = () => {
+      const ip = $('espIp').value.trim().replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+      $('espIp').value = ip;
       store.set('espIp', ip);
-      readings = []; store.set('readings', readings);
-      addLog(ip ? `Connecting to backend...` : 'Switched to demo mode', 'info');
+      readings = []; store.set('readings2', readings);
+      addLog(ip ? 'Connecting to backend...' : 'Switched to demo mode', 'info');
       setConn(ip ? 'connecting' : 'demo');
       tick();
     };
@@ -230,11 +274,12 @@ const WARN = 1100, DANGER = 1200, MAX = 2000, ARC_LEN = 251.3;
 
     function resetForm() {
       editIndex = -1;
-      $('cName').value = $('cPhone').value =$('cMsgr').value = '';
-      $('addContact').textContent = '+ Add contact';$('cancelEdit').style.display = 'none';
+      $('cName').value = $('cPhone').value = $('cMsgr').value = '';
+      $('addContact').textContent = '+ Add contact';
+      $('cancelEdit').style.display = 'none';
     }
-    
-   function startEdit(i) {
+
+    function startEdit(i) {
       const c = contacts[i];
       editIndex = i;
       $('cName').value = c.name;
@@ -251,7 +296,7 @@ const WARN = 1100, DANGER = 1200, MAX = 2000, ARC_LEN = 251.3;
       const sep = /iPhone|iPad|iPod/i.test(navigator.userAgent) ? '&' : '?';   // iPhone "&body=", Android "?body="
       location.href = `sms:${nums}${sep}body=${encodeURIComponent(alertMsg())}`;
     }
-    
+
     function openMessenger(c) {
       const msg = alertMsg();
       copyMsg(msg).then(ok => toast(ok ? 'Message copied — if the chat opens empty, just paste it' : 'If the chat opens empty, type your alert'));
@@ -291,10 +336,10 @@ const WARN = 1100, DANGER = 1200, MAX = 2000, ARC_LEN = 251.3;
 
     if (contactInputs && addBtn) {
       contactInputs.forEach(input => {
-        input.addEventListener('keypress', function(event) {
+        input.addEventListener('keypress', function (event) {
           if (event.key === 'Enter') {
-            event.preventDefault(); 
-            addBtn.click();       
+            event.preventDefault();
+            addBtn.click();
           }
         });
       });
@@ -312,17 +357,19 @@ const WARN = 1100, DANGER = 1200, MAX = 2000, ARC_LEN = 251.3;
         renderContacts();
       };
     }
-    
-    if ($('cancelEdit'))$('cancelEdit').onclick = resetForm;
 
-    if ($('smsAll')) {$('smsAll').onclick = () => {
+    if ($('cancelEdit')) $('cancelEdit').onclick = resetForm;
+
+    if ($('smsAll')) {
+      $('smsAll').onclick = () => {
         const list = contacts.filter(c => validPhone(c.phone));
         if (!list.length) { toast('Add a contact with a phone number first'); return; }
         openSms(list);
       };
     }
-    
-    if ($('shareBtn')) {$('shareBtn').onclick = async () => {
+
+    if ($('shareBtn')) {
+      $('shareBtn').onclick = async () => {
         const msg = alertMsg();
         if (navigator.share) {                  // phone share sheet: pick Messenger, SMS, etc.
           try { await navigator.share({ title: 'SafeHome Alert', text: msg }); addLog('Alert shared', 'info'); } catch {}
@@ -335,15 +382,16 @@ const WARN = 1100, DANGER = 1200, MAX = 2000, ARC_LEN = 251.3;
   }
 
   // ---- alert strip & theme (every page) ---------------------------------
-  if ($('strip'))$('strip').onclick = () => { location.href = 'contacts.html'; };
+  if ($('strip')) $('strip').onclick = () => { location.href = 'contacts.html'; };
 
   function applyTheme(t) {
     document.documentElement.dataset.theme = t;
-    if ($('themeBtn'))$('themeBtn').textContent = t === 'dark' ? '🌙' : '☀️';
+    if ($('themeBtn')) $('themeBtn').textContent = t === 'dark' ? '🌙' : '☀️';
   }
   applyTheme(document.documentElement.dataset.theme || 'dark');
-  
-  if ($('themeBtn')) {$('themeBtn').onclick = () => {
+
+  if ($('themeBtn')) {
+    $('themeBtn').onclick = () => {
       const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
       applyTheme(next);
       try { localStorage.setItem('theme', next); } catch {}
