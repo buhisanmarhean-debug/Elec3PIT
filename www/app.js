@@ -17,7 +17,7 @@
 
   // MQ-2 sends an absolute level (avg). Put here the value the app shows for the MQ-2
   // when nothing is happening (check it after warm-up/calibration).
-  const MQ2_IDLE = 900;
+  const MQ2_IDLE = 589;
 
   // The "alarm>" numbers your ESP32 prints in the serial monitor after calibration.
   const ALARM_AT = { mq2: 100, mq7: 40, mq135: 100 };
